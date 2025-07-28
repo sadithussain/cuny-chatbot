@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
@@ -27,26 +27,39 @@ def get_vector_store():
     # Check if the database exists
     if os.path.exists(persist_directory):
         print("Loading existing vector store")
+        # Fetch the vector store from the persist_directory
         vector_store = Chroma(
             persist_directory = persist_directory,
             embedding_function = embeddings
         )
         return vector_store
     else:
-        all_chunks = []
         print("Creating new vector base")
+        # In this array, we will store text from the pdf files
+        all_chunks = []
 
+        # Load all pdf files into all_chunks
         for root, dirs, files in os.walk(data_path):
             for file in files:
                 if file.endswith(".pdf"):
                     pdf_path = os.path.join(root, file)
                     loader = PyPDFLoader(pdf_path)
                     documents = loader.load()
+
+                    # Add metadata that allows for easier identification
+                    school_name = os.path.basename(root)
+                    for doc in documents:
+                        doc.metadata['school'] = school_name
+                    
                     all_chunks.extend(documents)
         
+        # text_splitter defines how exactly we want to split the pdf files
         text_splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap = 100)
+
+        # Use text_splitter on all_chunks to get split_chunks which holds split up text
         split_chunks = text_splitter.split_documents(all_chunks)
         
+        # Create a vector store from the current split_chunks
         vector_store = Chroma.from_documents(
             documents = split_chunks,
             persist_directory = persist_directory,
@@ -61,16 +74,33 @@ if "GOOGLE_API_KEY" not in os.environ:
 
 # Choose your model and tweaks
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash-lite",
-    temperature=0.2
+    model = "gemini-2.0-flash-lite",
+    # Creativity
+    temperature = 0.2
 )
 
 # Retrieve vector store
 vector_store = get_vector_store()
 
+# --- START OF DEBUGGING BLOCK ---
+# This block will help us see what the metadata looks like.
+print("\n--- Running a test retrieval to inspect metadata ---")
+test_retriever = vector_store.as_retriever()
+test_docs = test_retriever.get_relevant_documents("first day of classes")
+if test_docs:
+    print("Found some documents. Here is the metadata of the first one:")
+    print(test_docs[0].metadata)
+else:
+    print("Could not find any relevant documents without a filter.")
+print("--- End of debugging block ---\n")
+# --- END OF DEBUGGING BLOCK ---
+
+# Create empty chat history
+chat_history = []
+
 # Create system prompt. This message will describe how the prompt will be reformatted upon submission.
 system_prompt = """You are a helpful assistant for CUNY students named CUNYBot.
-Your goal is to answer questions as accurately as possible based on the provided context.
+Your goal is to answer questions as accurately as possible based on the provided context for the specified school.
 You must always respond in English.
 If you do not know the answer, say 'I am sorry, I cannot find that information. Could you be more specific?'
 Do not try to make up an answer.
@@ -87,41 +117,98 @@ QUESTION:
 ANSWER:
 """
 
-# Create a PromptTemplate object
-QA_PROMPT = PromptTemplate(
-    template=system_prompt,
-    input_variables=["context", "chat_history", "question"]
+# We use the PromptTemplate object to create a prompt template
+qa_prompt = PromptTemplate(
+    # Assign a format
+    template = system_prompt,
+    # Add input variables. Should be the exact ones used inside template
+    input_variables = ["context", "chat_history", "question"]
 )
-
-# Create empty chat history
-chat_history = []
 
 # Initialize memory
 memory = ConversationBufferWindowMemory(
-    k=3,
-    return_messages=True,
-    memory_key="chat_history" # This tells memory to store history under this key
+    # Chatbot's shot-term memory only remember last 3 responses and user queries
+    k = 3,
+    return_messages = True,
+    # Where the chatbot will be accessing its short-term memory from
+    memory_key = "chat_history", # This tells memory to store history under this key
+    output_key = "answer",
 )
+
+# Retrives top 4 vectors related to the question
+retriever = vector_store.as_retriever(search_kwargs = {'k': 4})
 
 # Create conversational chain
 qa_chain = ConversationalRetrievalChain.from_llm(
+    # Insert your llm you will use
     llm,
-    retriever = vector_store.as_retriever(search_kwargs = {'k': 4}),
+    # Set retriever
+    retriever = retriever,
+    # Plug in the short-term memory settings
     memory = memory,
-    combine_docs_chain_kwargs={"prompt": QA_PROMPT}
+    # Chatbot's instructions. This should be the QA_PROMPT which we made earlier
+    combine_docs_chain_kwargs={"prompt": qa_prompt},
+
+    # Return the documents for debugging. With this, we are able to see what the chatbot is referencing
+    return_source_documents = True
 )
 
 # Print ready message in console. This will be removed when we create the actual chatbbot interface
 print("CUNY Chatbot is ready! Type 'quit' to exit.")
 
+# This will determine which school the chatbot and user are focusing on right now. Initially it is set to None
+current_school = None
+
+# In data, we have several folder names that holds each school's data
+# To ensure we are looking in the right one, we must understand which school the user is talking about
+# We will create a dictionary to store a list of all possible ways of writing out the name of a school
+school_names = {
+    'ccny': ['ccny', 'city college', 'the city college of new york', 'cuny city college'],
+    'hunter': ['hunter', 'hunter college', 'cuny hunter'],
+
+}
+
 # Now create the loop which allows the conversation to continue until 'quit' is typed.
 while True:
+    # Collect the user's input
     user_input = input("You: ")
+    # Check if the user wants to quit
     if user_input.lower() == 'quit':
         print("Goodbye!")
         break
 
+    # Variable to detect if a new school is mentioned in the user's input
+    detected_school = None
+
+    # Find which school the user has mentioned, if any
+    for school_key, names in school_names.items():
+        if any(name in user_input.lower() for name in names):
+            detected_school = school_key
+            break
+
+    if detected_school:
+        current_school = detected_school
+        print(f"Now answering questions about {current_school.upper()}!")
+        qa_chain.retriever.search_kwargs['filter'] = {'school': current_school}
+
+    if not current_school:
+        print("For the most accurate information, please give the chatbot information about what school you are attending or asking questions about. For example: 'When is the first day of classes for City College?'")
+        continue
+
+    # Otherwise, get the chatbot's response given the user's input
     result = qa_chain.invoke({"question": user_input, "chat_history": chat_history})
     chat_history.append((user_input, result["answer"]))
 
+    # Print the response
     print(f"Bot: {result['answer']}")
+
+    # Debugging. Look at the source documents
+    if result['source_documents']:
+        print("\n--- Sources ---")
+        for doc in result['source_documents']:
+            # Print the source file path and the beginning of the content
+            print(f"Source: {doc.metadata.get('source', 'N/A')}, Page: {doc.metadata.get('page', 'N/A')}")
+            print(f"Content: {doc.page_content[:200]}...")
+        print("---------------")
+    else:
+        print("No sources found")
