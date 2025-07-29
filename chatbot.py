@@ -82,19 +82,6 @@ llm = ChatGoogleGenerativeAI(
 # Retrieve vector store
 vector_store = get_vector_store()
 
-# --- START OF DEBUGGING BLOCK ---
-# This block will help us see what the metadata looks like.
-print("\n--- Running a test retrieval to inspect metadata ---")
-test_retriever = vector_store.as_retriever()
-test_docs = test_retriever.get_relevant_documents("first day of classes")
-if test_docs:
-    print("Found some documents. Here is the metadata of the first one:")
-    print(test_docs[0].metadata)
-else:
-    print("Could not find any relevant documents without a filter.")
-print("--- End of debugging block ---\n")
-# --- END OF DEBUGGING BLOCK ---
-
 # Create empty chat history
 chat_history = []
 
@@ -201,14 +188,3 @@ while True:
 
     # Print the response
     print(f"Bot: {result['answer']}")
-
-    # Debugging. Look at the source documents
-    if result['source_documents']:
-        print("\n--- Sources ---")
-        for doc in result['source_documents']:
-            # Print the source file path and the beginning of the content
-            print(f"Source: {doc.metadata.get('source', 'N/A')}, Page: {doc.metadata.get('page', 'N/A')}")
-            print(f"Content: {doc.page_content[:200]}...")
-        print("---------------")
-    else:
-        print("No sources found")
