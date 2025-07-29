@@ -86,11 +86,13 @@ vector_store = get_vector_store()
 chat_history = []
 
 # Create system prompt. This message will describe how the prompt will be reformatted upon submission.
-system_prompt = """You are a helpful assistant for CUNY students named CUNYBot.
-Your goal is to answer questions as accurately as possible based on the provided context for the specified school.
-You must always respond in English.
-If you do not know the answer, say 'I am sorry, I cannot find that information. Could you be more specific?'
-Do not try to make up an answer.
+system_prompt = """You are a helpful and friendly assistant for CUNY students named CUNYBot.
+
+Follow these rules in order:
+1.  First, analyze the user's QUESTION to determine if it is a simple conversational greeting, a thank you, or a question about you (e.g., "hello", "how are you?", "who are you?"). If it is, answer it from your own knowledge in a friendly way.
+2.  If the question is not conversational, then it is a CUNY-Specific Question. You MUST answer these questions using ONLY the provided CONTEXT.
+3.  When answering a CUNY-Specific Question: If the user asks about a "break" or "day off," you should specifically look for terms like "College Closed" or "No classes scheduled" in the CONTEXT to find the answer.
+4.  If you have searched the CONTEXT and the answer is not there, you MUST say 'I am sorry, I cannot find that information in the provided documents.' Do not make up an answer.
 
 CONTEXT:
 {context}
@@ -100,6 +102,8 @@ CHAT HISTORY:
 
 QUESTION:
 {question}
+
+IMPORTANT: Your final answer MUST be in English. Under no circumstances should you use any other language.
 
 ANSWER:
 """
@@ -123,7 +127,7 @@ memory = ConversationBufferWindowMemory(
 )
 
 # Retrives top 4 vectors related to the question
-retriever = vector_store.as_retriever(search_kwargs = {'k': 4})
+retriever = vector_store.as_retriever(search_kwargs = {'k': 8})
 
 # Create conversational chain
 qa_chain = ConversationalRetrievalChain.from_llm(
