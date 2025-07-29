@@ -76,7 +76,7 @@ if "GOOGLE_API_KEY" not in os.environ:
 llm = ChatGoogleGenerativeAI(
     model = "gemini-2.0-flash-lite",
     # Creativity
-    temperature = 0.2
+    temperature = .2
 )
 
 # Retrieve vector store
