@@ -3,3 +3,5 @@
 venv/
 myenv/
 db/
+__pycache__/
+*.pyc

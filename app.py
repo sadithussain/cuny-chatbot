@@ -36,7 +36,7 @@ with st.sidebar:
     school_display_names = {key: aliases[1].title() for key, aliases in school_names.items()}
     selected_display_name = st.selectbox(
         "1. Choose a CUNY School:",
-        options=list(school_display_names.values()),
+        options = list(school_display_names.values()),
         index=None,
         placeholder="Select a school..."
     )
@@ -61,10 +61,19 @@ for message in st.session_state.messages:
 # --- Guardrail Logic ---
 # This is the same guardrail your friend added
 restricted_patterns = [
-    r"my financial aid", r"my aid status", r"my classes", r"my class schedule",
-    r"my schedule", r"my account", r"my application status", r"\bssn\b",
-    r"social security number", r"health advice", r"my social security",
-    r"my student id", r"my tuition"
+    r"my financial aid", 
+    r"my aid status", 
+    r"my classes",
+    r"my class schedule",
+    r"my schedule", 
+    r"my account", 
+    r"my application status", 
+    r"\bssn\b",
+    r"social security number", 
+    r"health advice", 
+    r"my social security",
+    r"my student id", 
+    r"my tuition"
 ]
 
 def is_restricted_question(user_input):
