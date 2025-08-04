@@ -2,10 +2,11 @@
 import getpass
 import os
 from dotenv import load_dotenv
+from tqdm import tqdm # Import the progress bar library
 
 # Langchain libraries
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, CSVLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain.chains import ConversationalRetrievalChain
@@ -26,57 +27,66 @@ def get_vector_store():
 
     # Check if the database exists
     if os.path.exists(persist_directory):
-        print("Loading existing vector store")
+        print("✅ Loading existing vector store...")
         # Fetch the vector store from the persist_directory
         vector_store = Chroma(
-            persist_directory = persist_directory,
-            embedding_function = embeddings
+            persist_directory=persist_directory,
+            embedding_function=embeddings
         )
         return vector_store
     else:
-        print("Creating new vector base")
+        print("🔎 Creating new vector base...")
         # In this array, we will store text from the pdf files
-        all_chunks = []
+        all_documents = []
 
-        # Load all pdf files into all_chunks
+        file_paths = []
         for root, dirs, files in os.walk(data_path):
             for file in files:
-                if file.endswith(".pdf"):
-                    pdf_path = os.path.join(root, file)
-                    loader = PyPDFLoader(pdf_path)
-                    documents = loader.load()
+                file_paths.append(os.path.join(root, file))
 
-                    # Add metadata that allows for easier identification
-                    school_name = os.path.basename(root)
-                    for doc in documents:
-                        doc.metadata['school'] = school_name
-                    
-                    all_chunks.extend(documents)
+        print("Loading and processing files...")
+        for file_path in tqdm(file_paths, desc="Files"):
+            print(f"  - Processing file: {file_path}")
+            documents = []
+            school_name = os.path.basename(os.path.dirname(file_path))
+
+            if file_path.endswith('.pdf'):
+                loader = PyPDFLoader(file_path)
+                documents = loader.load()
+            elif file_path.endswith('.csv'):
+                loader = CSVLoader(file_path, encoding="utf-8")
+                documents = loader.load()
+
+            if documents:
+                for doc in documents:
+                    doc.metadata['school'] = school_name
+                all_documents.extend(documents)
         
         # text_splitter defines how exactly we want to split the pdf files
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap = 100)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 
         # Use text_splitter on all_chunks to get split_chunks which holds split up text
-        split_chunks = text_splitter.split_documents(all_chunks)
+        split_chunks = text_splitter.split_documents(all_documents)
         
         # Create a vector store from the current split_chunks
+        print("🧠 Creating new vector store (this may take several minutes)...")
         vector_store = Chroma.from_documents(
-            documents = split_chunks,
-            persist_directory = persist_directory,
-            embedding = embeddings
+            documents=split_chunks,
+            embedding=embeddings,
+            persist_directory=persist_directory
         )
-
+        print("✅ New vector store created successfully!")
         return vector_store
-                    
+        
 # Check if the Google API key exists. Otherwise, ask the user to enter theirs.
 if "GOOGLE_API_KEY" not in os.environ:
     os.environ["GOOGLE_API_KEY"] = getpass.getpass("Enter your Google AI API key: ")
 
 # Choose your model and tweaks
 llm = ChatGoogleGenerativeAI(
-    model = "gemini-2.0-flash-lite",
+    model="gemini-2.0-flash-lite",
     # Creativity
-    temperature = .2
+    temperature=.2
 )
 
 # Retrieve vector store
@@ -111,41 +121,41 @@ ANSWER:
 # We use the PromptTemplate object to create a prompt template
 qa_prompt = PromptTemplate(
     # Assign a format
-    template = system_prompt,
+    template=system_prompt,
     # Add input variables. Should be the exact ones used inside template
-    input_variables = ["context", "chat_history", "question"]
+    input_variables=["context", "chat_history", "question"]
 )
 
 # Initialize memory
 memory = ConversationBufferWindowMemory(
     # Chatbot's shot-term memory only remember last 3 responses and user queries
-    k = 3,
-    return_messages = True,
+    k=3,
+    return_messages=True,
     # Where the chatbot will be accessing its short-term memory from
-    memory_key = "chat_history", # This tells memory to store history under this key
-    output_key = "answer",
+    memory_key="chat_history", # This tells memory to store history under this key
+    output_key="answer",
 )
 
-# Retrives top 4 vectors related to the question
-retriever = vector_store.as_retriever(search_kwargs = {'k': 8})
+# Retrives top 8 vectors related to the question
+retriever = vector_store.as_retriever(search_kwargs={'k': 8})
 
 # Create conversational chain
 qa_chain = ConversationalRetrievalChain.from_llm(
     # Insert your llm you will use
     llm,
     # Set retriever
-    retriever = retriever,
+    retriever=retriever,
     # Plug in the short-term memory settings
-    memory = memory,
+    memory=memory,
     # Chatbot's instructions. This should be the QA_PROMPT which we made earlier
     combine_docs_chain_kwargs={"prompt": qa_prompt},
 
     # Return the documents for debugging. With this, we are able to see what the chatbot is referencing
-    return_source_documents = True
+    return_source_documents=True
 )
 
 # Print ready message in console. This will be removed when we create the actual chatbbot interface
-print("CUNY Chatbot is ready! Type 'quit' to exit.")
+print("\nCUNY Chatbot is ready! Type 'quit' to exit.")
 
 # This will determine which school the chatbot and user are focusing on right now. Initially it is set to None
 current_school = None
@@ -156,7 +166,6 @@ current_school = None
 school_names = {
     'ccny': ['ccny', 'city college', 'the city college of new york', 'cuny city college'],
     'hunter': ['hunter', 'hunter college', 'cuny hunter'],
-
 }
 
 # Now create the loop which allows the conversation to continue until 'quit' is typed.
@@ -179,11 +188,12 @@ while True:
 
     if detected_school:
         current_school = detected_school
-        print(f"Now answering questions about {current_school.upper()}!")
+        print(f"Bot: Okay, I will now answer questions about {current_school.upper()}.")
         qa_chain.retriever.search_kwargs['filter'] = {'school': current_school}
+        continue
 
     if not current_school:
-        print("For the most accurate information, please give the chatbot information about what school you are attending or asking questions about. For example: 'When is the first day of classes for City College?'")
+        print("Bot: To give you the most accurate information, please tell me which CUNY school you're asking about (e.g., 'When is the first day of classes for City College?').")
         continue
 
     # Otherwise, get the chatbot's response given the user's input
