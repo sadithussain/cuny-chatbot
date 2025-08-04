@@ -159,6 +159,26 @@ school_names = {
 
 }
 
+# Restricted patterns #patterns that the chatbot will not answer
+restricted_patterns = [
+    r"financial aid",
+    r"aid status",
+    r"my classes",
+    r"\bclass schedule\b",
+    r"my schedule",
+    r"my account",
+    r"application status",
+    r"\bssn\b",
+    r"social security number",
+    r"health advice"
+    r"social security",
+    r"student id number",
+    r"Student id",
+    r"tuition"
+    
+    ]
+
+
 # Now create the loop which allows the conversation to continue until 'quit' is typed.
 while True:
     # Collect the user's input
@@ -167,6 +187,12 @@ while True:
     if user_input.lower() == 'quit':
         print("Goodbye!")
         break
+
+# Check for any restricted questions
+    if is_restricted_question(user_input):
+        print("Bot:Sorry, I'm unable to access personal or sensitive information. "
+              "Please contact your school's official office for help.")
+        continue
 
     # Variable to detect if a new school is mentioned in the user's input
     detected_school = None
