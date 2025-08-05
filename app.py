@@ -48,7 +48,7 @@ with st.sidebar:
     if st.session_state.selected_school:
         st.session_state.selected_category = st.selectbox(
             "2. Choose a Category:",
-            options=["All", "Schedules", "Professor Reviews"],
+            options=["All", "Academic Calendar", "Professor Reviews"],
             index=0 # Default to "All"
         )
         st.success(f"Ready to answer questions about {selected_display_name} in the '{st.session_state.selected_category}' category!")
@@ -109,8 +109,8 @@ if prompt := st.chat_input("Ask a question..."):
                 # --- Robust filter logic ---
                 current_filter = {'school': st.session_state.selected_school}
                 
-                if st.session_state.selected_category == "Schedules":
-                    current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'schedule'}]}
+                if st.session_state.selected_category == "Academic Calendar":
+                    current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'academic_calendar'}]}
                 elif st.session_state.selected_category == "Professor Reviews":
                     current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'rmp_reviews'}]}
                 

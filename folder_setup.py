@@ -15,7 +15,8 @@ CUNY_SCHOOLS = [
 # --- NEW: A list of subfolders to create within each school's folder ---
 # You can add more subfolder names here in the future, like 'schedules'
 SUBFOLDERS = [
-    'rmp_reviews'
+    'rmp_reviews',
+    'academic_calendar',
 ]
 
 def create_school_folders():

@@ -19,56 +19,20 @@ load_dotenv()
 
 # --- Data Loading and Processing ---
 def get_vector_store():
-    data_path = "data_demo"
-    persist_directory = "db"
+    PERSIST_DIRECTORY = "db"
     embeddings = GoogleGenerativeAIEmbeddings(model = "text-embedding-004")
 
-    if os.path.exists(persist_directory):
-        print("✅ Loading existing vector store...")
-        vector_store = Chroma(
-            persist_directory = persist_directory,
-            embedding_function = embeddings
-        )
-        return vector_store
-    else:
-        print("🔎 Creating new vector base...")
-        all_documents = []
-        file_paths = []
-        for root, dirs, files in os.walk(data_path):
-            for file in files:
-                file_paths.append(os.path.join(root, file))
-
-        print("Loading and processing files...")
-        for file_path in tqdm(file_paths, desc = "Files"):
-            documents = []
-            if file_path.endswith('.pdf'):
-                loader = PyPDFLoader(file_path)
-                documents = loader.load()
-            elif file_path.endswith('.csv'):
-                loader = CSVLoader(file_path, encoding = "utf-8")
-                documents = loader.load()
-
-            if documents:
-                path_parts = os.path.normpath(file_path).split(os.sep)
-                if len(path_parts) > 2:
-                    school_name = path_parts[1]
-                    doc_type = path_parts[2] 
-                    for doc in documents:
-                        doc.metadata['school'] = school_name
-                        doc.metadata['type'] = doc_type
-                    all_documents.extend(documents)
-        
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap = 100)
-        split_chunks = text_splitter.split_documents(all_documents)
-        
-        print("🧠 Creating new vector store (this may take several minutes)...")
-        vector_store = Chroma.from_documents(
-            documents=split_chunks,
-            embedding=embeddings,
-            persist_directory=persist_directory
-        )
-        print("✅ New vector store created successfully!")
-        return vector_store
+    if not os.path.exists(PERSIST_DIRECTORY):
+        print("Database not found")
+        print("Please run 'python update_db.py' to build the knowledge base")
+        exit()
+    
+    print("Loading existing vector store")
+    vector_store = Chroma(
+        persist_directory = PERSIST_DIRECTORY,
+        embedding_function = embeddings
+    )
+    return vector_store
 
 # --- Chain Creation ---
 def create_chain(vector_store):
