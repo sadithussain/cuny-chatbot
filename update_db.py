@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 from tqdm import tqdm
 from dotenv import load_dotenv
 import getpass
@@ -37,21 +38,29 @@ def save_log(log_data):
     with open(LOG_FILE, 'w') as f:
         json.dump(log_data, f, indent = 4)
 
-def get_files_to_proceed(force_rebuild = False):
-    log_data = {} if force_rebuild else load_log()
+def get_files_to_proceed(force_rebuild=False, files_to_force=None):
+    if files_to_force is None:
+        files_to_force = []
 
+    log_data = {} if force_rebuild else load_log()
     files_to_process = []
+
     for root, dirs, files in os.walk(DATA_PATH):
         for file in files:
             file_path = os.path.join(root, file)
+            normalized_file_path = os.path.normpath(file_path)
+            
             modified_time = os.path.getmtime(file_path)
 
-            if force_rebuild or file_path not in log_data or modified_time > log_data[file_path]:
-                files_to_process.append(file_path)
+            if (force_rebuild or
+                normalized_file_path in files_to_force or
+                normalized_file_path not in log_data or
+                modified_time > log_data.get(normalized_file_path, 0)):
+                files_to_process.append(normalized_file_path)
 
     return files_to_process, log_data
 
-def update_vector_store():
+def update_vector_store(files_to_force = None):
     embeddings = GoogleGenerativeAIEmbeddings(model = "text-embedding-004")
 
     force_rebuild = not os.path.exists(PERSIST_DIRECTORY)
@@ -63,7 +72,19 @@ def update_vector_store():
         embedding_function = embeddings
     )
 
-    files_to_process, log_data = get_files_to_proceed(force_rebuild)
+    files_to_process, log_data = get_files_to_proceed(force_rebuild, files_to_force)
+
+    if not force_rebuild and files_to_process:
+        ids_to_delete = []
+        print("Checking existing data from updated files to remove...")
+        for file_path in files_to_process:
+            results = vector_store.get(where = {"source": file_path})
+            if results and results['ids']:
+                ids_to_delete.extend(results['ids'])  
+
+        if ids_to_delete:
+            print(f"Delting {len(ids_to_delete)} old chunks from the database...")
+            vector_store.delete(ids = ids_to_delete)
 
     if not files_to_process:
         print("Knowledge base is already up-to-date")
@@ -96,7 +117,7 @@ def update_vector_store():
     if pdf_documents:
         print(f"Splitting {len(pdf_documents)} PDF documents into chunks...")
 
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size = 1200, chunk_overlap = 150)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size = 800, chunk_overlap = 100)
         split_pdf_chunks = text_splitter.split_documents(pdf_documents)
         final_chunks.extend(split_pdf_chunks)
 
@@ -113,4 +134,16 @@ def update_vector_store():
     save_log(log_data)
 
 if __name__ == "__main__":
-    update_vector_store()
+    files_to_force_reprocess = []
+    if '--reprocess' in sys.argv:
+        try:
+            reprocess_index = sys.argv.index('--reprocess')
+            files_to_reprocess_raw = sys.argv[reprocess_index + 1:]
+            if not files_to_reprocess_raw:
+                print("Error: --reprocess flag used but no file paths were provided")
+                sys.exit(1)
+            files_to_force_reprocess = [os.path.normpath(p) for p in files_to_reprocess_raw]
+        except (ValueError, IndexError):
+            pass
+
+    update_vector_store(files_to_force=files_to_force_reprocess)
