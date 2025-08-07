@@ -2,10 +2,11 @@
 import getpass
 import os
 from dotenv import load_dotenv
-import re # Import the regular expression library
 
 # Langchain libraries
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
@@ -14,165 +15,226 @@ from langchain.prompts import PromptTemplate
 # Load environment variables
 load_dotenv()
 
-# Function to get the vector store
+# Function to laod or create information database
 def get_vector_store():
-    # Vector store location
-    PERSIST_DIRECTORY = "db"
-    # Our embedding function
-    embeddings = GoogleGenerativeAIEmbeddings(model = "text-embedding-004")
+    # Name of the folder where data is stored
+    data_path = "data"
+    # Where data vector will be fetched from/created
+    persist_directory = "db"
+    # Model that translates text into numerical vectors
+    embeddings = GoogleGenerativeAIEmbeddings(model="text-embedding-004")
 
-    # If the vector store folder doesn't exist, it will exit and tells us to run the updata_db script
-    if not os.path.exists(PERSIST_DIRECTORY):
-        print("Database not found")
-        print("Please run 'python update_db.py' to build the knowledge base")
-        exit()
-    
-    # Otherwise, load the vector store
-    print("Loading existing vector store")
-    # Use the Chroma library
-    vector_store = Chroma(
-        # Select the location of the vector store
-        persist_directory = PERSIST_DIRECTORY,
-        # Choose the embedding function
-        embedding_function = embeddings
-    )
-    
-    # Return the vector store
-    return vector_store
+    # Check if the database exists
+    if os.path.exists(persist_directory):
+        print("Loading existing vector store")
+        # Fetch the vector store from the persist_directory
+        vector_store = Chroma(
+            persist_directory = persist_directory,
+            embedding_function = embeddings
+        )
+        return vector_store
+    else:
+        print("Creating new vector base")
+        # In this array, we will store text from the pdf files
+        all_chunks = []
 
-# Function to create the chain that the RAG Chatbot functions on
-def create_chain(vector_store):
-    # Retrieve the Google Gemini API Key
-    if "GOOGLE_API_KEY" not in os.environ:
-        os.environ["GOOGLE_API_KEY"] = getpass.getpass("Enter your Google AI API key: ")
+        # Load all pdf files into all_chunks
+        for root, dirs, files in os.walk(data_path):
+            for file in files:
+                if file.endswith(".pdf"):
+                    pdf_path = os.path.join(root, file)
+                    loader = PyPDFLoader(pdf_path)
+                    documents = loader.load()
 
-    # Choose the LLM version and temperature (low temperature for less creativity and more factuality)
-    llm = ChatGoogleGenerativeAI(model = "gemini-2.0-flash-lite", temperature = .2)
+                    # Add metadata that allows for easier identification
+                    school_name = os.path.basename(root)
+                    for doc in documents:
+                        doc.metadata['school'] = school_name
+                    
+                    all_chunks.extend(documents)
+        
+        # text_splitter defines how exactly we want to split the pdf files
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap = 100)
 
-    # This is the prompt that will be passed to the chatbot along with the user's question. This is very important as it defines how the chatbot should respond to the user.
-    system_prompt = """You are a helpful and friendly assistant for CUNY students named CUNYBot.
+        # Use text_splitter on all_chunks to get split_chunks which holds split up text
+        split_chunks = text_splitter.split_documents(all_chunks)
+        
+        # Create a vector store from the current split_chunks
+        vector_store = Chroma.from_documents(
+            documents = split_chunks,
+            persist_directory = persist_directory,
+            embedding = embeddings
+        )
 
-    Follow these rules in order:
-    1.  First, analyze the user's QUESTION to determine if it is a simple conversational greeting, a thank you, or a question about you (e.g., "hello", "how are you?", "who are you?"). If it is, answer it from your own knowledge in a friendly way.
-    2.  If the question is not conversational, then it is a CUNY-Specific Question. You MUST answer these questions using ONLY the provided CONTEXT.
-    3.  If the CONTEXT contains multiple reviews about a professor, you must synthesize them into a helpful summary. Do not just list the raw comments. For example, start your response with "Students have mixed reviews about..." or "Professor [Name] is generally well-regarded..." and then summarize the key points.
-    4.  When answering a CUNY-Specific Question: If the user asks about a "break" or "day off," you should specifically look for terms like "College Closed" or "No classes scheduled" in the CONTEXT to find the answer.
-    5.  If you have searched the CONTEXT and the answer is not there, you MUST say 'I am sorry, I cannot find that information in the provided documents.' Do not make up an answer.
+        return vector_store
+                    
+# Check if the Google API key exists. Otherwise, ask the user to enter theirs.
+if "GOOGLE_API_KEY" not in os.environ:
+    os.environ["GOOGLE_API_KEY"] = getpass.getpass("Enter your Google AI API key: ")
 
-    CONTEXT:
-    {context}
+# Choose your model and tweaks
+llm = ChatGoogleGenerativeAI(
+    model = "gemini-2.0-flash-lite",
+    # Creativity
+    temperature = .2
+)
 
-    CHAT HISTORY:
-    {chat_history}
+# Retrieve vector store
+vector_store = get_vector_store()
 
-    QUESTION:
-    {question}
+# Create empty chat history
+chat_history = []
 
-    IMPORTANT: Your final answer MUST be in English. Under no circumstances should you use any other language.
+# Create system prompt. This message will describe how the prompt will be reformatted upon submission.
+system_prompt = """You are a helpful and friendly assistant for CUNY students named CUNYBot.
 
-    ANSWER:
-    """
+You must NOT answer any questions related to:
+- Financial aid or aid status (e.g., "financial aid", "aid status")
+- Class schedules or personal class information (e.g., "my classes", "class schedule", "my schedule")
+- Application or account status (e.g., "my account", "application status")
+- Social Security numbers or student ID numbers (e.g., "ssn", "social security number", "student id")
+- Health advice (e.g., "health advice")
+- Tuition or billing questions (e.g., "tuition")
 
-    # Create the QA Prompt using the PromptTemplate object. We pass the system prompt as the template. We also include the input variables. These variables are variables that are used inside the system prompt/template as seen above.
-    qa_prompt = PromptTemplate(template = system_prompt, input_variables = ["context", "chat_history", "question"])
-    
-    # This is the chatbot's short term memory. The k value defines how many back-and-forth interactions the chatbot is able to see into the past. This will be the chat_history variable that we see in the system prompt/template.
-    memory = ConversationBufferWindowMemory(k = 3, return_messages = True, memory_key = "chat_history", output_key = "answer")
+If the question is about any of the above, respond:
+"I'm sorry, I'm unable to access personal or sensitive information. Please contact your school's official office for help."
 
-    # We turn the vector store into a retriever. This allows the RAG Chatbot to retrieve information. The RAG Chatbot is able to be the top k relevant chunks.
-    retriever = vector_store.as_retriever(search_kwargs = {'k': 8})
 
-    # We create the final QA Chain. This combines everything including our LLM model, our retriever, memory, and the prompt is set as the qa_prompt variable. We also return the source documents which allows us to see what chunks the RAG Chatbot used to come to it's answer.
-    qa_chain = ConversationalRetrievalChain.from_llm(
-        llm,
-        retriever = retriever,
-        memory = memory,
-        combine_docs_chain_kwargs = {"prompt": qa_prompt},
-        return_source_documents = True
-    )
+Follow these rules in order:
+1.  First, analyze the user's QUESTION to determine if it is a simple conversational greeting, a thank you, or a question about you (e.g., "hello", "how are you?", "who are you?"). If it is, answer it from your own knowledge in a friendly way.
+2.  If the question is not conversational, then it is a CUNY-Specific Question. You MUST answer these questions using ONLY the provided CONTEXT.
+3.  When answering a CUNY-Specific Question: If the user asks about a "break" or "day off," you should specifically look for terms like "College Closed" or "No classes scheduled" in the CONTEXT to find the answer.
+4.  If you have searched the CONTEXT and the answer is not there, you MUST say 'I am sorry, I cannot find that information in the provided documents.' Do not make up an answer.
 
-    # Return the final QA Chain
-    return qa_chain
+CONTEXT:
+{context}
 
-# List of schools in the CUNY system and a list of names that they may be called by.
+CHAT HISTORY:
+{chat_history}
+
+QUESTION:
+{question}
+
+IMPORTANT: Your final answer MUST be in English. Under no circumstances should you use any other language.
+
+ANSWER:
+"""
+
+# We use the PromptTemplate object to create a prompt template
+qa_prompt = PromptTemplate(
+    # Assign a format
+    template = system_prompt,
+    # Add input variables. Should be the exact ones used inside template
+    input_variables = ["context", "chat_history", "question"]
+)
+
+# Initialize memory
+memory = ConversationBufferWindowMemory(
+    # Chatbot's shot-term memory only remember last 3 responses and user queries
+    k = 3,
+    return_messages = True,
+    # Where the chatbot will be accessing its short-term memory from
+    memory_key = "chat_history", # This tells memory to store history under this key
+    output_key = "answer",
+)
+
+# Retrives top 4 vectors related to the question
+retriever = vector_store.as_retriever(search_kwargs = {'k': 8})
+
+# Create conversational chain
+qa_chain = ConversationalRetrievalChain.from_llm(
+    # Insert your llm you will use
+    llm,
+    # Set retriever
+    retriever = retriever,
+    # Plug in the short-term memory settings
+    memory = memory,
+    # Chatbot's instructions. This should be the QA_PROMPT which we made earlier
+    combine_docs_chain_kwargs={"prompt": qa_prompt},
+
+    # Return the documents for debugging. With this, we are able to see what the chatbot is referencing
+    return_source_documents = True
+)
+
+# Print ready message in console. This will be removed when we create the actual chatbbot interface
+print("CUNY Chatbot is ready! Type 'quit' to exit.")
+
+# This will determine which school the chatbot and user are focusing on right now. Initially it is set to None
+current_school = None
+
+# In data, we have several folder names that holds each school's data
+# To ensure we are looking in the right one, we must understand which school the user is talking about
+# We will create a dictionary to store a list of all possible ways of writing out the name of a school
 school_names = {
-    'baruch': ['baruch', 'baruch college'], 
-    'bmcc': ['bmcc', 'borough of manhattan community college'],
-    'bronxcc': ['bronxcc', 'bronx community college'], 
-    'brooklyn': ['brooklyn', 'brooklyn college'],
-    'citytech': ['city tech', 'citytech', 'new york city college of technology'], 
-    'csi': ['csi', 'college of staten island'],
-    'guttman': ['guttman', 'guttman community college'], 
-    'hostos': ['hostos', 'hostos community college'],
-    'hunter': ['hunter', 'hunter college'], 
-    'johnjay': ['john jay', 'johnjay', 'john jay college of criminal justice'],
-    'kingsborough': ['kingsborough', 'kingsborough community college'], 
-    'laguardia': ['laguardia', 'laguardia community college'],
-    'lehman': ['lehman', 'lehman college'], 
-    'medgarevers': ['medgar evers', 'medgarevers', 'medgar evers college'],
-    'queens': ['queens', 'queens college'], 
-    'queensborough': ['queensborough', 'queensborough community college'],
-    'york': ['york', 'york college'], 
-    'ccny': ['ccny', 'city college', 'the city college of new york'],
-    'cunygrad': ['cuny grad', 'cuny graduate center', 'the graduate center'], 
-    'cunylaw': ['cuny law', 'cuny school of law'],
-    'cunysph': ['cuny sph', 'cuny school of public health'], 
-    'cunyslu': ['cuny slu', 'cuny school of labor and urban studies'],
-    'cunysps': ['cuny sps', 'cuny school of professional studies']
+    'ccny': ['ccny', 'city college', 'the city college of new york', 'cuny city college'],
+    'hunter': ['hunter', 'hunter college', 'cuny hunter'],
+
 }
 
-# What happens when this file is run from the terminal directly. Ex: 'python chatbot.py'
-if __name__ == "__main__":
-    # Get the vector store
-    vector_store = get_vector_store()
-
-    # Create a QA chain using our vector store
-    qa_chain = create_chain(vector_store)
+# Restricted patterns #patterns that the chatbot will not answer
+restricted_patterns = [
+    r"financial aid",
+    r"aid status",
+    r"my classes",
+    r"\bclass schedule\b",
+    r"my schedule",
+    r"my account",
+    r"application status",
+    r"\bssn\b",
+    r"social security number",
+    r"health advice"
+    r"social security",
+    r"student id number",
+    r"Student id",
+    r"tuition"
     
-    print("\nCUNY Chatbot is ready! Type 'quit' to exit.")
+    ]
 
-    # No school has been chosen yet so there is no current school
-    current_school = None
 
-    # The chat history is empty since no conversation has begun yet
-    chat_history = []
+import re
 
-    # This is an infinite loop that runs until the user types 'quit'
-    while True:
-        # If the user hasn't mentioned a school yet, we ask them which school they are interested in
-        if not current_school:
-            # We get the lower case version of what input they have to the question below
-            school_input = input("Which CUNY school are you interested in? (e.g., 'ccny', 'hunter'): ").lower()
-            # We search through the list of school names
-            for key, aliases in school_names.items():
-                # If the user's input is inside of any of the list of aliases that are inside the list of school names, then the current school becomes the name of the school that that alias represents
-                if school_input in aliases:
-                    current_school = key
-                    break
-            
-            # If the user has successfully entered a school, the RAG Chatbot will filter information relevant to only that specific school
-            if current_school:
-                 print(f"Bot: Okay, I will now answer questions about {current_school.upper()}.")
-                 qa_chain.retriever.search_kwargs['filter'] = {'school': current_school}
-            
-            # If the user still hasn't mentioned a school, they will be asked to try again
-            else:
-                print("Invalid school. Please try again.")
-                continue
+def is_restricted_question(text):
+    for pattern in restricted_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
 
-        # Get the user input
-        user_input = input("You: ")
+# Now create the loop which allows the conversation to continue until 'quit' is typed.
+while True:
+    # Collect the user's input
+    user_input = input("You: ")
+    # Check if the user wants to quit
+    if user_input.lower() == 'quit':
+        print("Goodbye!")
+        break
 
-        # If the user typed 'quit', then the application closes
-        if user_input.lower() == 'quit':
-            print("Goodbye!")
+# Check for any restricted questions
+    if is_restricted_question(user_input):
+        print("Bot:Sorry, I'm unable to access personal or sensitive information. "
+              "Please contact your school's official office for help.")
+        continue
+
+    # Variable to detect if a new school is mentioned in the user's input
+    detected_school = None
+
+    # Find which school the user has mentioned, if any
+    for school_key, names in school_names.items():
+        if any(name in user_input.lower() for name in names):
+            detected_school = school_key
             break
-        
-        # Get the response by passing the user's question and the chat history
-        result = qa_chain.invoke({"question": user_input, "chat_history": chat_history})
 
-        # Add the response to the chat history
-        chat_history.append((user_input, result["answer"]))
+    if detected_school:
+        current_school = detected_school
+        print(f"Now answering questions about {current_school.upper()}!")
+        qa_chain.retriever.search_kwargs['filter'] = {'school': current_school}
 
-        # Print out the response for the user to see
-        print(f"Bot: {result['answer']}")
+    if not current_school:
+        print("For the most accurate information, please give the chatbot information about what school you are attending or asking questions about. For example: 'When is the first day of classes for City College?'")
+        continue
+
+    # Otherwise, get the chatbot's response given the user's input
+    result = qa_chain.invoke({"question": user_input, "chat_history": chat_history})
+    chat_history.append((user_input, result["answer"]))
+
+    # Print the response
+    print(f"Bot: {result['answer']}")
