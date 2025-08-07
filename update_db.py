@@ -1,4 +1,4 @@
-# Import required libaries
+# Import required libraries
 import os
 import json
 import sys
@@ -31,13 +31,24 @@ def assign_metadata_to_docs(documents, file_path):
     # Create a list that separates the file location into multiple parts 
     # Ex: ['data', 'ccny', 'academic_calendar']
     path_parts = os.path.normpath(file_path).split(os.sep)
-    # Retrieve and assign school and document type to the metadata
-    school_name = path_parts[1] if len(path_parts) > 2 else "Unknown"
-    doc_type = path_parts[2] if len(path_parts) > 2 else "Unknown"
+
+    # Try statement to make code safer
+    try:
+        # Retrieve and assign school and document type to the metadata
+        school_name = path_parts[1] 
+        doc_type = path_parts[2] 
+
+    except IndexError:
+        school_name = "Unknown"
+        doc_type = "Unknown"
+        print(f"Warning: Could not determine school/type for {file_path}. Using 'Unknown'.")
+
     for doc in documents:
         doc.metadata['school'] = school_name
         doc.metadata['type'] = doc_type
+
     return documents
+    
 
 # Function to get the log file
 def load_log():
@@ -102,22 +113,54 @@ def update_vector_store(files_to_force = None):
     # Get the files to be processed and log
     files_to_process, log_data = get_files_to_proceed(force_rebuild, files_to_force)
 
-    # If we are not forcing a rebuild and there are still files to be processed, gather the ids of those files to delete them from our database
-    if not force_rebuild and files_to_process:
-        # List of ids to be deleted
-        ids_to_delete = []
-        print("Checking existing data from updated files to remove...")
-        for file_path in files_to_process:
-            # Get the results from our vector store using the file path
-            results = vector_store.get(where = {"source": file_path})
-            if results and results['ids']:
-                # Collect the ids if they exist
-                ids_to_delete.extend(results['ids'])  
+    # --- LOGIC TO DELETE FILES FROM OUR DATABASE ---
 
-        # If there are ids to delete, delete them by passing the list of ids to delete
-        if ids_to_delete:
-            print(f"Delting {len(ids_to_delete)} old chunks from the database...")
-            vector_store.delete(ids = ids_to_delete)
+    if not force_rebuild:
+        print("Checking for file changes to synchronize database...")
+
+        # Get all the existing chunks in the database
+        existing_docs = vector_store.get(include = ["metadatas", "ids"])
+
+        # Get the unique sources since multiple chunks may have the same source
+        db_sources = set(meta['source'] for meta in existing_docs["metadatas"])
+
+        # Create an empty set to store the files that are in our data folder
+        disk_files = set()
+
+        # Add the files that are currently in our data folder to our set of files
+        for root, dirs, files in os.walk(DATA_PATH):
+            for file in files:
+                file_path = os.path.normpath(os.path.join(root, file))
+                disk_files.add(file_path)
+
+        # The files we need to delete are the files that are in our database but not in our data folder
+        files_to_delete = db_sources - disk_files
+
+        # Check updated files by seeing which files to be processed are in our database
+        updated_files = set(f for f in files_to_process if f in db_sources)
+
+        # Combine the files to delete set and updates files set to get all the files that must be deleted
+        all_files_to_purge = files_to_delete.union(updated_files)
+
+        if all_files_to_purge:
+            # Clean the log by removing entries for any file that will be removed
+            print(f"Removing {len(all_files_to_purge)} entries from the log file...")
+            for file_path in all_files_to_purge:
+                log_data.pop(file_path, None)
+
+            # Get the ids of the chunks to delete
+            ids_to_delete = [
+                # Check if the chunks' source is inside the files to purse set
+                doc_id for doc_id, metadata in zip(existing_docs['ids'], existing_docs['metadatas'])
+                if metadata['source'] in all_files_to_purge
+            ]
+
+            if ids_to_delete:
+                print(f"Removing {len(ids_to_delete)} old or removed document chunks")
+                vector_store.delete(ids = ids_to_delete)
+
+        else:
+            print("Database is synchronized. No old or deleted files to remove.")
 
     # If there are no files to process, then the knowledge base is already up to date
     if not files_to_process:
