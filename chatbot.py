@@ -2,13 +2,10 @@
 import getpass
 import os
 from dotenv import load_dotenv
-from tqdm import tqdm # Import the progress bar library
 import re # Import the regular expression library
 
 # Langchain libraries
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader, CSVLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
@@ -17,30 +14,42 @@ from langchain.prompts import PromptTemplate
 # Load environment variables
 load_dotenv()
 
-# --- Data Loading and Processing ---
+# Function to get the vector store
 def get_vector_store():
+    # Vector store location
     PERSIST_DIRECTORY = "db"
+    # Our embedding function
     embeddings = GoogleGenerativeAIEmbeddings(model = "text-embedding-004")
 
+    # If the vector store folder doesn't exist, it will exit and tells us to run the updata_db script
     if not os.path.exists(PERSIST_DIRECTORY):
         print("Database not found")
         print("Please run 'python update_db.py' to build the knowledge base")
         exit()
     
+    # Otherwise, load the vector store
     print("Loading existing vector store")
+    # Use the Chroma library
     vector_store = Chroma(
+        # Select the location of the vector store
         persist_directory = PERSIST_DIRECTORY,
+        # Choose the embedding function
         embedding_function = embeddings
     )
+    
+    # Return the vector store
     return vector_store
 
-# --- Chain Creation ---
+# Function to create the chain that the RAG Chatbot functions on
 def create_chain(vector_store):
+    # Retrieve the Google Gemini API Key
     if "GOOGLE_API_KEY" not in os.environ:
         os.environ["GOOGLE_API_KEY"] = getpass.getpass("Enter your Google AI API key: ")
 
+    # Choose the LLM version and temperature (low temperature for less creativity and more factuality)
     llm = ChatGoogleGenerativeAI(model = "gemini-2.0-flash-lite", temperature = .2)
 
+    # This is the prompt that will be passed to the chatbot along with the user's question. This is very important as it defines how the chatbot should respond to the user.
     system_prompt = """You are a helpful and friendly assistant for CUNY students named CUNYBot.
 
     Follow these rules in order:
@@ -64,11 +73,16 @@ def create_chain(vector_store):
     ANSWER:
     """
 
+    # Create the QA Prompt using the PromptTemplate object. We pass the system prompt as the template. We also include the input variables. These variables are variables that are used inside the system prompt/template as seen above.
     qa_prompt = PromptTemplate(template = system_prompt, input_variables = ["context", "chat_history", "question"])
     
+    # This is the chatbot's short term memory. The k value defines how many back-and-forth interactions the chatbot is able to see into the past. This will be the chat_history variable that we see in the system prompt/template.
     memory = ConversationBufferWindowMemory(k = 3, return_messages = True, memory_key = "chat_history", output_key = "answer")
+
+    # We turn the vector store into a retriever. This allows the RAG Chatbot to retrieve information. The RAG Chatbot is able to be the top k relevant chunks.
     retriever = vector_store.as_retriever(search_kwargs = {'k': 8})
 
+    # We create the final QA Chain. This combines everything including our LLM model, our retriever, memory, and the prompt is set as the qa_prompt variable. We also return the source documents which allows us to see what chunks the RAG Chatbot used to come to it's answer.
     qa_chain = ConversationalRetrievalChain.from_llm(
         llm,
         retriever = retriever,
@@ -76,9 +90,11 @@ def create_chain(vector_store):
         combine_docs_chain_kwargs = {"prompt": qa_prompt},
         return_source_documents = True
     )
+
+    # Return the final QA Chain
     return qa_chain
 
-# --- School Data ---
+# List of schools in the CUNY system and a list of names that they may be called by.
 school_names = {
     'baruch': ['baruch', 'baruch college'], 
     'bmcc': ['bmcc', 'borough of manhattan community college'],
@@ -105,34 +121,58 @@ school_names = {
     'cunysps': ['cuny sps', 'cuny school of professional studies']
 }
 
-# --- Terminal Interaction (Only runs when this file is executed directly) ---
+# What happens when this file is run from the terminal directly. Ex: 'python chatbot.py'
 if __name__ == "__main__":
+    # Get the vector store
     vector_store = get_vector_store()
+
+    # Create a QA chain using our vector store
     qa_chain = create_chain(vector_store)
     
     print("\nCUNY Chatbot is ready! Type 'quit' to exit.")
+
+    # No school has been chosen yet so there is no current school
     current_school = None
+
+    # The chat history is empty since no conversation has begun yet
     chat_history = []
 
+    # This is an infinite loop that runs until the user types 'quit'
     while True:
+        # If the user hasn't mentioned a school yet, we ask them which school they are interested in
         if not current_school:
+            # We get the lower case version of what input they have to the question below
             school_input = input("Which CUNY school are you interested in? (e.g., 'ccny', 'hunter'): ").lower()
+            # We search through the list of school names
             for key, aliases in school_names.items():
+                # If the user's input is inside of any of the list of aliases that are inside the list of school names, then the current school becomes the name of the school that that alias represents
                 if school_input in aliases:
                     current_school = key
                     break
+            
+            # If the user has successfully entered a school, the RAG Chatbot will filter information relevant to only that specific school
             if current_school:
                  print(f"Bot: Okay, I will now answer questions about {current_school.upper()}.")
                  qa_chain.retriever.search_kwargs['filter'] = {'school': current_school}
+            
+            # If the user still hasn't mentioned a school, they will be asked to try again
             else:
                 print("Invalid school. Please try again.")
                 continue
 
+        # Get the user input
         user_input = input("You: ")
+
+        # If the user typed 'quit', then the application closes
         if user_input.lower() == 'quit':
             print("Goodbye!")
             break
         
+        # Get the response by passing the user's question and the chat history
         result = qa_chain.invoke({"question": user_input, "chat_history": chat_history})
+
+        # Add the response to the chat history
         chat_history.append((user_input, result["answer"]))
+
+        # Print out the response for the user to see
         print(f"Bot: {result['answer']}")
