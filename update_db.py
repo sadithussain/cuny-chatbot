@@ -119,7 +119,7 @@ def update_vector_store(files_to_force = None):
         print("Checking for file changes to synchronize database...")
 
         # Get all the existing chunks in the database
-        existing_docs = vector_store.get(include = ["metadatas", "ids"])
+        existing_docs = vector_store.get(include = ["metadatas"])
 
         # Get the unique sources since multiple chunks may have the same source
         db_sources = set(meta['source'] for meta in existing_docs["metadatas"])
@@ -147,6 +147,8 @@ def update_vector_store(files_to_force = None):
             print(f"Removing {len(all_files_to_purge)} entries from the log file...")
             for file_path in all_files_to_purge:
                 log_data.pop(file_path, None)
+
+            save_log(log_data)
 
             # Get the ids of the chunks to delete
             ids_to_delete = [
