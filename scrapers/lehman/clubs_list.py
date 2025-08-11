@@ -25,10 +25,10 @@ def scrape_lehman_clubs_api():
         response = requests.get(API_URL, headers=HEADERS)
         response.raise_for_status()
 
-        # 1. Parse the JSON data from the API response.
+        # Parse the JSON data from the API response.
         data = response.json()
         
-        # 2. Extract the list of clubs from the JSON structure.
+        # Extract the list of clubs from the JSON structure.
         # The actual club data is inside the 'value' key.
         clubs = data.get('value', [])
 
@@ -37,7 +37,7 @@ def scrape_lehman_clubs_api():
             return
 
         scraped_data = []
-        # 3. Loop through each club in the JSON list.
+        # Loop through each club in the JSON list.
         for club in clubs:
             website_key = club.get('WebsiteKey')
 
@@ -62,7 +62,7 @@ def scrape_lehman_clubs_api():
                 'page_url': page_url
             })
 
-        # 4. Save the clean data to a CSV file.
+        # Save the clean data to a CSV file.
         print(f"Saving details for {len(scraped_data)} clubs to {OUTPUT_FILENAME}...")
         os.makedirs(OUTPUT_DIR, exist_ok = True)
         with open(OUTPUT_FILENAME, 'w', newline = '', encoding = 'utf-8') as f:
