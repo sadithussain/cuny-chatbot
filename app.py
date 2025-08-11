@@ -67,7 +67,7 @@ with st.sidebar:
             # Title
             "2. Choose a Category:",
             # Options, we need to manually add these
-            options = ["All", "Academic Calendar", "Professor Reviews"],
+            options = ["All", "Academic Calendar", "Professor Reviews", "Clubs"],
             index = 0 # Default to "All"
         )
         st.success(f"Ready to answer questions about {selected_display_name} in the '{st.session_state.selected_category}' category!")
@@ -132,18 +132,13 @@ if prompt := st.chat_input("Ask a question..."):
                     current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'academic_calendar'}]}
                 elif st.session_state.selected_category == "Professor Reviews":
                     current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'rmp_reviews'}]}
+                elif st.session_state.selected_category == "Clubs":
+                    current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'clubs'}]}
                 
                 qa_chain.retriever.search_kwargs['filter'] = current_filter
-                
-                # Get the chat history in the format the chain expects
-                chat_history = [
-                    (msg["content"], st.session_state.messages[i+1]["content"])
-                    for i, msg in enumerate(st.session_state.messages)
-                    if msg["role"] == "user" and i + 1 < len(st.session_state.messages)
-                ]
 
                 # Invoke the chain to get a result
-                result = qa_chain.invoke({"question": prompt, "chat_history": chat_history})
+                result = qa_chain.invoke(prompt)
                 response = result["answer"]
                 st.markdown(response)
 
