@@ -8,8 +8,7 @@ DATA_DIR = "data"
 CUNY_SCHOOLS = [
     'baruch', 'bmcc', 'bronxcc', 'brooklyn', 'citytech', 'csi', 'guttman',
     'hostos', 'hunter', 'johnjay', 'kingsborough', 'laguardia', 'lehman',
-    'medgarevers', 'queens', 'queensborough', 'york', 'ccny',
-    'cunygrad', 'cunylaw', 'cunysph', 'cunyslu', 'cunysps'
+    'medgarevers', 'queens', 'queensborough', 'york', 'ccny'
 ]
 
 # --- NEW: A list of subfolders to create within each school's folder ---

@@ -67,7 +67,7 @@ with st.sidebar:
             # Title
             "2. Choose a Category:",
             # Options, we need to manually add these
-            options = ["All", "Academic Calendar", "Professor Reviews", "Clubs"],
+            options = ["All", "Academic Calendar", "Professor Reviews", "Clubs", "Student Tips"],
             index = 0 # Default to "All"
         )
         st.success(f"Ready to answer questions about {selected_display_name} in the '{st.session_state.selected_category}' category!")
@@ -134,6 +134,8 @@ if prompt := st.chat_input("Ask a question..."):
                     current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'rmp_reviews'}]}
                 elif st.session_state.selected_category == "Clubs":
                     current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'clubs'}]}
+                elif st.session_state.selected_category == "Student Tips":
+                    current_filter = {"$and": [{'school': st.session_state.selected_school}, {'type': 'student_tips'}]}
                 
                 qa_chain.retriever.search_kwargs['filter'] = current_filter
 

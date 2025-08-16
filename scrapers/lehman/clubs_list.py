@@ -1,4 +1,4 @@
-# scrapers/lehman/clubs.py
+# Import required libraries
 import requests
 import csv
 from bs4 import BeautifulSoup
@@ -16,10 +16,6 @@ HEADERS = {
 }
 
 def scrape_lehman_clubs_api():
-    """
-    Fetches student club data directly from the CampusLabs API
-    and saves it to a CSV file.
-    """
     print(f"Fetching data from API: {API_URL}...")
     try:
         response = requests.get(API_URL, headers=HEADERS)
@@ -51,7 +47,7 @@ def scrape_lehman_clubs_api():
 
             # Use BeautifulSoup to parse the HTML and get only the clean text
             if raw_description:
-                soup = BeautifulSoup(raw_description, 'html.parser')
+                soup = BeautifulSoup(raw_description, 'lxml')
                 description = soup.get_text(strip = True)
             else:
                 description = "No Description Found"

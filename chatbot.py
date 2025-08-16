@@ -17,8 +17,6 @@ from langchain.retrievers.multi_query import MultiQueryRetriever
 # Load environment variables
 load_dotenv()
 
-# --- Reusable Data and Functions for the App ---
-
 # This dictionary provides the school names and their aliases for the UI and filtering.
 school_names = {
     'baruch': ['baruch', 'Baruch College'], 
@@ -38,12 +36,7 @@ school_names = {
     'queens': ['queens', 'Queens College'], 
     'queensborough': ['queensborough', 'Queensborough Community College'],
     'york': ['york', 'York College'], 
-    'ccny': ['ccny', 'City College'],
-    'cunygrad': ['cunygrad', 'The Graduate Center'], 
-    'cunylaw': ['cunylaw', 'Cuny School Of Law'],
-    'cunysph': ['cunysph', 'Cuny School Of Public Health'], 
-    'cunyslu': ['cunyslu', 'Cuny School Of Labor And Urban Studies'],
-    'cunysps': ['cunysps', 'Cuny School Of Professional Studies']
+    'ccny': ['ccny', 'City College']
 }
 
 
