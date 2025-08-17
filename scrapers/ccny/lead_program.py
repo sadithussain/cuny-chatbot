@@ -7,7 +7,7 @@ import os
 # Website URL and file output path
 TARGET_URL = "https://www.ccny.cuny.edu/cpdi/cuny-leads-program"
 OUTPUT_DIR = "data_demo/ccny/student_tips"
-OUTPUT_FILENAME = os.path.join(OUTPUT_DIR, "ccny_leads_tips.csv")
+OUTPUT_FILENAME = os.path.join(OUTPUT_DIR, "lead_program.csv")
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
